@@ -339,7 +339,7 @@ for(pnum=0;
 printf("\n");
 if (mflag) {
   out=fopen("ptable.bin","w");
-  fwrite(databuf+0x1800,1,0x800,out);
+  fwrite(databuf+0x1f800,1,0x800,out);
   fclose(out);
   return;
 }
