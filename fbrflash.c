@@ -123,11 +123,13 @@ int readblock(int blk, char* databuf, int oobflag) {
 int i;
 char allbuf[0x1000];
 
-for(i=0;i<4;i++) {
-  if (readpage(blk*0x2000+0x800*i,allbuf) != 0x840) return 0;
+for(i=0;i<64;i++) {
+  if (readpage(blk*0x20000+0x800*i,allbuf) != 0x840) return 0;
   if (oobflag) memcpy(databuf+0x840*i,allbuf,0x840);
   else         memcpy(databuf+0x800*i,allbuf,0x800);
 }
+// printf("\n----- block %i ------",blk);
+// dump(databuf,0x800*64); fflush(stdout);
 return 1;
 }
 
@@ -140,7 +142,7 @@ void main(int argc, char* argv[]) {
 struct termios sioparm;
 char cmdbuf[8192];
 char* lptr;
-char databuf[0x3000];
+char databuf[0x840*65];
 char oobuf[0x200];
 int dlen;
 FILE* out;
@@ -228,8 +230,8 @@ printf("\n Утилита для чтения flash модемов на balong-�
 }  
 
 // полный размер блока
-if (!oflag) blklen=0x800*4;
-else 	    blklen=0x840*4;
+if (!oflag) blklen=0x800*64;
+else 	    blklen=0x840*64;
 
 // настройка интерфейса
 
@@ -308,19 +310,19 @@ if (rflag) {
 
 // чтение таблицы разделов
 
-if (!readblock(15,databuf,0)) {
+if (!readblock(0,databuf,0)) {
   printf("\n Ошибка чтения таблицы разделов\n");
   return;
 }
-memcpy(ptable,databuf+0x1830,0x7c0);
+memcpy(ptable,databuf+0x1f830,0x7c0);
 
 if (mflag) printf("\n ## ----- NAME ----- start  len  loadsize loadaddr  entry    flags    type     count\n------------------------------------------------------------------------------------------");
 for(pnum=0;
    (ptable[pnum].name[0] != 0) &&
    (strcmp(ptable[pnum].name,"T") != 0);
    pnum++) {
-   ptable[pnum].start/=0x2000;
-   ptable[pnum].length/=0x2000;
+   ptable[pnum].start/=0x20000;
+   ptable[pnum].length/=0x20000;
 
    if (mflag) printf("\n %02i %-16.16s %4x  %4x  %08x %08x %08x %08x %08x %08x",
 	 pnum,
