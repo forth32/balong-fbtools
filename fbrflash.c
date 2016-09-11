@@ -152,6 +152,7 @@ unsigned int blk;
 int pnum;
 unsigned int opt;
 int i,j,skipflag;
+int pflag=0;
 
 unsigned int mflag=0,oflag=0,rflag=0;
 unsigned int pnums[50];  // список разделов для чтения
@@ -185,6 +186,7 @@ printf("\n Утилита для чтения flash модемов на balong-�
        return;
      }  
     strcpy(sioname,optarg);
+    pflag=1;
     break;
 
    case 'u':
@@ -231,7 +233,9 @@ else 	    blklen=0x840*4;
 
 // настройка интерфейса
 
-if (upid == 0) {
+if (!pflag && (upid == 0)) upid=0x36dd; // композиция fastboot по умолчанию
+
+if (pflag) {
 
   // Настройка SIO
  siofd = open(sioname, O_RDWR | O_NOCTTY |O_SYNC);
