@@ -2,17 +2,21 @@
 //
 //
 #include <stdio.h>
+#ifndef WIN32
 #include <string.h>
 #include <stdlib.h>
-#include <termios.h>
-#include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <termios.h>
+#include <unistd.h>
 #include <libusb-1.0/libusb.h>
-//#include <usb.h>
+#else
+#include <windows.h>
+#include "wingetopt.h"
+#include "printf.h"
+#endif
 
-int siofd;
 
 struct {
     char name[16];
@@ -27,11 +31,17 @@ struct {
 } ptable[100];
 
 
+#ifndef WIN32
+int siofd;
+
 libusb_context* ctx=0;
 libusb_device_handle* udev=0;
 unsigned char EP_out = 0x81; // выходной EP - для приема данных от устройства
 unsigned char EP_in  = 0x01; // входной EP - для передачит данных устройству
 int upid=0;                  // PID устройства для режима libusb
+#else
+static HANDLE hSerial;
+#endif
 
 
 //*************************************************
@@ -73,6 +83,8 @@ for (i=0;i<len;i+=16) {
 int sendcmd(char* cmdbuf, char* resbuf) {
 
 int dlen;
+
+#ifndef WIN32
 int res;
 
 if (upid == 0) {
@@ -98,6 +110,20 @@ else {
     return 0;
   }
 }  
+#else
+DWORD bytes_written = 0;
+//BOOL res;
+
+WriteFile(hSerial, cmdbuf, strlen(cmdbuf), &bytes_written, NULL);
+FlushFileBuffers(hSerial);
+
+//Sleep(2);
+
+dlen = 0;
+/*res = */ReadFile(hSerial, resbuf, 0x1000, (LPDWORD)&dlen, NULL);
+//res = GetLastError();
+#endif
+
 return dlen; 
 }
 
@@ -123,11 +149,13 @@ int readblock(int blk, char* databuf, int oobflag) {
 int i;
 char allbuf[0x1000];
 
-for(i=0;i<4;i++) {
-  if (readpage(blk*0x2000+0x800*i,allbuf) != 0x840) return 0;
+for(i=0;i<64;i++) {
+  if (readpage(blk*0x20000+0x800*i,allbuf) != 0x840) return 0;
   if (oobflag) memcpy(databuf+0x840*i,allbuf,0x840);
   else         memcpy(databuf+0x800*i,allbuf,0x800);
 }
+// printf("\n----- block %i ------",blk);
+// dump(databuf,0x800*64); fflush(stdout);
 return 1;
 }
 
@@ -137,15 +165,21 @@ return 1;
 
 void main(int argc, char* argv[]) {
 
+#ifndef WIN32
 struct termios sioparm;
-char cmdbuf[8192];
-char* lptr;
-char databuf[0x3000];
-char oobuf[0x200];
-int dlen;
+#else
+char device[20] = "\\\\.\\COM";
+DCB dcbSerialParams = {0};
+COMMTIMEOUTS CommTimeouts;
+#endif
+char databuf[0x840*65];
 FILE* out;
 char filename[100];
+#ifndef WIN32
 char sioname[50]="/dev/ttyUSB0";
+#else
+char sioname[50]="";
+#endif
 unsigned int startblk;
 unsigned int len;
 unsigned int blk;
@@ -180,16 +214,23 @@ printf("\n Утилита для чтения flash модемов на balong-�
     return;
 
    case 'p':
+#ifndef WIN32
     if (upid != 0) {
        printf("\n Ключи -p и -u несовместимы\n");
        return;
      }  
+#endif
     strcpy(sioname,optarg);
     break;
 
    case 'u':
+#ifndef WIN32
     sscanf(optarg,"%x",&upid); 
     break;
+#else
+    printf("\n Ключ -u не поддерживается!\n");
+    return;
+#endif
     
    case 'm':
     mflag=1;
@@ -226,13 +267,23 @@ printf("\n Утилита для чтения flash модемов на balong-�
 }  
 
 // полный размер блока
-if (!oflag) blklen=0x800*4;
-else 	    blklen=0x840*4;
+if (!oflag) blklen=0x800*64;
+else 	    blklen=0x840*64;
 
 // настройка интерфейса
 
+#ifndef WIN32
 if (upid == 0) {
+#endif
+#ifdef WIN32
+    if (*sioname == '\0')
+    {
+       printf("\n - Последовательный порт не задан\n"); 
+       return; 
+    }
+#endif
 
+#ifndef WIN32
   // Настройка SIO
  siofd = open(sioname, O_RDWR | O_NOCTTY |O_SYNC);
  if (siofd == -1) {
@@ -278,12 +329,50 @@ else {
      return;
   }
 }
+#else
+strcat(device, sioname);
+    
+hSerial = CreateFileA(device, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+if (hSerial == INVALID_HANDLE_VALUE)
+{
+    printf("\n - Последовательный порт COM%s не открывается\n", sioname); 
+    return;
+}
+
+ZeroMemory(&dcbSerialParams, sizeof(dcbSerialParams));
+dcbSerialParams.DCBlength=sizeof(dcbSerialParams);
+dcbSerialParams.BaudRate = CBR_115200;
+dcbSerialParams.ByteSize = 8;
+dcbSerialParams.StopBits = ONESTOPBIT;
+dcbSerialParams.Parity = NOPARITY;
+dcbSerialParams.fBinary = TRUE;
+dcbSerialParams.fDtrControl = DTR_CONTROL_ENABLE;
+dcbSerialParams.fRtsControl = RTS_CONTROL_ENABLE;
+if (!SetCommState(hSerial, &dcbSerialParams))
+{
+    printf("\n - Ошибка при инициализации COM-порта\n", sioname); 
+    CloseHandle(hSerial);
+    return;
+}
+
+CommTimeouts.ReadIntervalTimeout = 2/*MAXDWORD*/;
+CommTimeouts.ReadTotalTimeoutConstant = 500;
+CommTimeouts.ReadTotalTimeoutMultiplier = 0;
+CommTimeouts.WriteTotalTimeoutConstant = 0;
+CommTimeouts.WriteTotalTimeoutMultiplier = 0;
+if (!SetCommTimeouts(hSerial, &CommTimeouts))
+{
+    printf("\n - Ошибка при инициализации COM-порта\n", sioname); 
+    CloseHandle(hSerial);
+    return;
+}
+#endif
 
 // режим абсолютного чтения
 if (rflag) {
  printf("\n");	 
  sprintf(filename,"blk%04x.%s",startblk,oflag?"oob":"bin");
- out=fopen(filename,"w");
+ out=fopen(filename,"wb");
  if (out == 0) {
    printf("\n Ошибка открытия выходного файла %s\n",filename);
    return;
@@ -304,19 +393,19 @@ if (rflag) {
 
 // чтение таблицы разделов
 
-if (!readblock(15,databuf,0)) {
+if (!readblock(0,databuf,0)) {
   printf("\n Ошибка чтения таблицы разделов\n");
   return;
 }
-memcpy(ptable,databuf+0x1830,0x7c0);
+memcpy(ptable,databuf+0x1f830,0x7c0);
 
 if (mflag) printf("\n ## ----- NAME ----- start  len  loadsize loadaddr  entry    flags    type     count\n------------------------------------------------------------------------------------------");
 for(pnum=0;
    (ptable[pnum].name[0] != 0) &&
    (strcmp(ptable[pnum].name,"T") != 0);
    pnum++) {
-   ptable[pnum].start/=0x2000;
-   ptable[pnum].length/=0x2000;
+   ptable[pnum].start/=0x20000;
+   ptable[pnum].length/=0x20000;
 
    if (mflag) printf("\n %02i %-16.16s %4x  %4x  %08x %08x %08x %08x %08x %08x",
 	 pnum,
@@ -332,8 +421,8 @@ for(pnum=0;
 }
 printf("\n");
 if (mflag) {
-  out=fopen("ptable.bin","w");
-  fwrite(databuf+0x1800,1,0x800,out);
+  out=fopen("ptable.bin","wb");
+  fwrite(databuf+0x1f800,1,0x800,out);
   fclose(out);
   return;
 }
@@ -365,6 +454,8 @@ for(i=0;i<pnum;i++) {
  }
  fclose(out);
 } 
+
+#ifndef WIN32
 // деинициализация libusb
 if (upid != 0) {
   libusb_release_interface(udev,0);
@@ -372,6 +463,7 @@ if (upid != 0) {
   libusb_close(udev);
   libusb_exit(ctx);
 }  
+#endif
 
 printf("\n\n");  
 }
