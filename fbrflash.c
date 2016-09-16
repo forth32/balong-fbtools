@@ -354,7 +354,7 @@ for(i=0;i<pnum;i++) {
   }
  printf("\n"); 
  sprintf(filename,"%02i-%s.%s",i,ptable[i].name,oflag?"oob":"bin");
- out=fopen(filename,"w");
+ out=fopen(filename,"wb");
  for (blk=ptable[i].start;blk<ptable[i].start+ptable[i].length;blk++) {
   printf("\r Раздел %s  Блок %04x",ptable[i].name,blk); fflush(stdout);
   if (!readblock(blk,databuf,oflag)) {
