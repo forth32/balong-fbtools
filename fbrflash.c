@@ -143,6 +143,7 @@ return sendcmd(cmdbuf,buf);
 //*
 //*  oobflag=0 - чтение data
 //*  oobflag=1 - чтение data+oob
+//*  oobflag=2 - чтение data+yaffs2 tag
 //*****************************************
 int readblock(int blk, char* databuf, int oobflag) {
   
@@ -151,11 +152,18 @@ char allbuf[0x1000];
 
 for(i=0;i<64;i++) {
   if (readpage(blk*0x20000+0x800*i,allbuf) != 0x840) return 0;
-  if (oobflag) memcpy(databuf+0x840*i,allbuf,0x840);
-  else         memcpy(databuf+0x800*i,allbuf,0x800);
+  switch (oobflag) {
+    case 0:   // data
+      memcpy(databuf+0x800*i,allbuf,0x800);
+      break;
+    case 1:  // data+oob
+      memcpy(databuf+0x840*i,allbuf,0x840);
+      break;
+    case 2:  // data+tag 
+      memcpy(databuf+0x840*i,allbuf,0x840);
+      break;
+  }    
 }
-// printf("\n----- block %i ------",blk);
-// dump(databuf,0x800*64); fflush(stdout);
 return 1;
 }
 
@@ -187,14 +195,14 @@ int pnum;
 unsigned int opt;
 int i,j,skipflag;
 
-unsigned int mflag=0,oflag=0,rflag=0;
+unsigned int mflag=0,oflag=0,rflag=0,yflag=0,oobflag;
 unsigned int pnums[50];  // список разделов для чтения
 unsigned int pncount=0;  // число разделов для чтения
 int blklen;
 int usbkdriver=0;        // признак занятости usb-устройства драйвером ядра
 
 
-while ((opt = getopt(argc, argv, "u:p:mof:r:h")) != -1) {
+while ((opt = getopt(argc, argv, "u:p:mof:r:hy")) != -1) {
   switch (opt) {
    case 'h': 
      
@@ -207,6 +215,7 @@ printf("\n Утилита для чтения flash модемов на balong-�
 -u <pid> - PID USB-устройства fastboot в режиме libusb\n\
 -m       - показать карту разделов\n\
 -o       - чтение с OOB (в формате 2048+64), без ключа - только данные\n\
+-y       - чтение с тегом yaffs2 в формате 2048+16\n\
 -f #     - чтение раздела с указанным номером, ключ можно указать несколько раз\n\
 -r start[:len] - прочитать len блоков с блока start (по умолчанию len=1)\n\
 без ключа -r и -f - чтение всех разделов модема\n\
@@ -240,6 +249,10 @@ printf("\n Утилита для чтения flash модемов на balong-�
     oflag=1;
     break;
     
+   case 'y':
+    yflag=1;
+    break;
+    
    case 'f':
      if (rflag) {
        printf("\n Ключи -f и -r несовместимы\n");
@@ -266,9 +279,24 @@ printf("\n Утилита для чтения flash модемов на balong-�
   }
 }  
 
+if (oflag && yflag) {
+  printf("\n Ключи -y и -o несовместимы\n");
+  return;
+}  
+
 // полный размер блока
-if (!oflag) blklen=0x800*64;
-else 	    blklen=0x840*64;
+if (oflag) {
+  blklen=0x840*64;           // полный oob 
+  oobflag=1;
+}  
+else if (yflag) {
+  blklen=0x816*64;      // yaffs2 тег
+  oobflag=2;
+}  
+else {
+  blklen=0x840*64;          // только данные
+  oobflag=0;
+}  
 
 // настройка интерфейса
 
@@ -379,7 +407,7 @@ if (rflag) {
  }
  for (blk=startblk;blk<startblk+len;blk++) {
   printf("\r Блок %04x",blk); fflush(stdout);
-  if (!readblock(blk,databuf,oflag)) {
+  if (!readblock(blk,databuf,oobflag)) {
     printf(" - ошибка чтения");
     break;
   }  
