@@ -296,7 +296,7 @@ else if (yflag) {
   oobflag=2;
 }  
 else {
-  blklen=0x840*64;          // только данные
+  blklen=0x800*64;          // только данные
   oobflag=0;
 }  
 
