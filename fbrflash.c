@@ -160,7 +160,7 @@ for(i=0;i<64;i++) {
       memcpy(databuf+0x840*i,allbuf,0x840);
       break;
     case 2:  // data+tag 
-      memcpy(databuf+0x840*i,allbuf,0x840);
+      memcpy(databuf+0x810*i,allbuf,0x810);
       break;
   }    
 }
@@ -201,6 +201,8 @@ unsigned int pncount=0;  // число разделов для чтения
 int blklen;
 int usbkdriver=0;        // признак занятости usb-устройства драйвером ядра
 
+// Расширения выходных файлов 
+char* extlist[3]={"bin","oob","yaffs2"};
 
 while ((opt = getopt(argc, argv, "u:p:mof:r:hy")) != -1) {
   switch (opt) {
@@ -290,7 +292,7 @@ if (oflag) {
   oobflag=1;
 }  
 else if (yflag) {
-  blklen=0x816*64;      // yaffs2 тег
+  blklen=0x810*64;      // yaffs2 тег
   oobflag=2;
 }  
 else {
@@ -399,7 +401,7 @@ if (!SetCommTimeouts(hSerial, &CommTimeouts))
 // режим абсолютного чтения
 if (rflag) {
  printf("\n");	 
- sprintf(filename,"blk%04x.%s",startblk,oflag?"oob":"bin");
+ sprintf(filename,"blk%04x.%s",startblk,extlist[oobflag]);
  out=fopen(filename,"wb");
  if (out == 0) {
    printf("\n Ошибка открытия выходного файла %s\n",filename);
@@ -470,7 +472,7 @@ for(i=0;i<pnum;i++) {
    if (skipflag) continue;
   }
  printf("\n"); 
- sprintf(filename,"%02i-%s.%s",i,ptable[i].name,oflag?"oob":"bin");
+ sprintf(filename,"%02i-%s.%s",i,ptable[i].name,extlist[oobflag]);
  out=fopen(filename,"wb");
  for (blk=ptable[i].start;blk<ptable[i].start+ptable[i].length;blk++) {
   printf("\r Раздел %s  Блок %04x",ptable[i].name,blk); fflush(stdout);
