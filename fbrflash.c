@@ -141,18 +141,18 @@ return sendcmd(cmdbuf,buf);
 //*****************************************
 //*  Чтение блока флешки 
 //*
-//*  oobflag=0 - чтение data
-//*  oobflag=1 - чтение data+oob
-//*  oobflag=2 - чтение data+yaffs2 tag
+//*  oobmode=0 - чтение data
+//*  oobmode=1 - чтение data+oob
+//*  oobmode=2 - чтение data+yaffs2 tag
 //*****************************************
-int readblock(int blk, char* databuf, int oobflag) {
+int readblock(int blk, char* databuf, int oobmode) {
   
 int i;
 char allbuf[0x1000];
 
 for(i=0;i<64;i++) {
   if (readpage(blk*0x20000+0x800*i,allbuf) != 0x840) return 0;
-  switch (oobflag) {
+  switch (oobmode) {
     case 0:   // data
       memcpy(databuf+0x800*i,allbuf,0x800);
       break;
@@ -195,7 +195,7 @@ int pnum;
 unsigned int opt;
 int i,j,skipflag;
 
-unsigned int mflag=0,oflag=0,rflag=0,yflag=0,oobflag,tflag=0;
+unsigned int mflag=0,oflag=0,rflag=0,yflag=0,oobmode,tflag=0;
 unsigned int pnums[50];  // список разделов для чтения
 unsigned int pncount=0;  // число разделов для чтения
 int blklen;
@@ -299,15 +299,15 @@ if (oflag && yflag) {
 // полный размер блока
 if (oflag) {
   blklen=0x840*64;           // полный oob 
-  oobflag=1;
+  oobmode=1;
 }  
 else if (yflag) {
   blklen=0x810*64;      // yaffs2 тег
-  oobflag=2;
+  oobmode=2;
 }  
 else {
   blklen=0x800*64;          // только данные
-  oobflag=0;
+  oobmode=0;
 }  
 
 // настройка интерфейса
@@ -411,7 +411,7 @@ if (!SetCommTimeouts(hSerial, &CommTimeouts))
 // режим абсолютного чтения
 if (rflag) {
  printf("\n");	 
- sprintf(filename,"blk%04x.%s",startblk,extlist[oobflag]);
+ sprintf(filename,"blk%04x.%s",startblk,extlist[oobmode]);
  out=fopen(filename,"wb");
  if (out == 0) {
    printf("\n Ошибка открытия выходного файла %s\n",filename);
@@ -419,7 +419,7 @@ if (rflag) {
  }
  for (blk=startblk;blk<startblk+len;blk++) {
   printf("\r Блок %04x",blk); fflush(stdout);
-  if (!readblock(blk,databuf,oflag)) {
+  if (!readblock(blk,databuf,oobmode)) {
     printf(" - ошибка чтения");
     break;
   }  
@@ -445,7 +445,7 @@ if (!tflag) {
 
 else {
   // таблица разделов из файла
-  pt=fopen(ptfile,"r");
+  pt=fopen(ptfile,"rb");
   if (pt == 0) {
     printf("\n ошибка открытия файла таблицы разделов %s",ptfile);
     return;
@@ -498,11 +498,11 @@ for(i=0;i<pnum;i++) {
    if (skipflag) continue;
   }
  printf("\n"); 
- sprintf(filename,"%02i-%s.%s",i,ptable[i].name,extlist[oobflag]);
+ sprintf(filename,"%02i-%s.%s",i,ptable[i].name,extlist[oobmode]);
  out=fopen(filename,"wb");
  for (blk=ptable[i].start;blk<ptable[i].start+ptable[i].length;blk++) {
   printf("\r Раздел %s  Блок %04x",ptable[i].name,blk); fflush(stdout);
-  if (!readblock(blk,databuf,oflag)) {
+  if (!readblock(blk,databuf,oobmode)) {
     printf(" - ошибка чтения");
     break;
   }  
