@@ -348,14 +348,14 @@ else {
   if (usbkdriver) {
    i=libusb_detach_kernel_driver(udev,0);
    if (i < 0) {
-     printf("\n Невозможно отсоединить устройство от ядра: PID=%04x - %s\n",udev,libusb_error_name(i));
+     printf("\n Невозможно отсоединить устройство от ядра:  %s\n",libusb_error_name(i));
      return;
    }
   } 
   libusb_set_configuration(udev,1);  
   i=libusb_claim_interface(udev,0);
   if (i<0) {
-     printf("\n Невозможно захватить интерфейс 0 устройства: PID=%04x - %s\n",udev,libusb_error_name(i));
+     printf("\n Невозможно захватить интерфейс 0 устройства: %s\n",libusb_error_name(i));
      return;
   }
 }
