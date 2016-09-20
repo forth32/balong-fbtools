@@ -38,7 +38,7 @@ libusb_context* ctx=0;
 libusb_device_handle* udev=0;
 unsigned char EP_out = 0x81; // выходной EP - для приема данных от устройства
 unsigned char EP_in  = 0x01; // входной EP - для передачит данных устройству
-int upid=0;                  // PID устройства для режима libusb
+int upid=0x36dd;                  // PID устройства для режима libusb
 #else
 static HANDLE hSerial;
 #endif
@@ -394,7 +394,6 @@ if (!SetCommTimeouts(hSerial, &CommTimeouts))
     CloseHandle(hSerial);
     return;
 }
-<<<<<<< HEAD
 #endif
 
 // режим абсолютного чтения
@@ -483,8 +482,6 @@ for(i=0;i<pnum;i++) {
  }
  fclose(out);
 } 
-=======
-#endif
 
 // режим абсолютного чтения
 if (rflag) {
@@ -572,7 +569,6 @@ for(i=0;i<pnum;i++) {
  }
  fclose(out);
 } 
->>>>>>> c659f2dc0cfd3804c67c17b32166ba37c86565d6
 
 #ifndef WIN32
 // деинициализация libusb
