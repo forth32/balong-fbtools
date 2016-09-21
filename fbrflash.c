@@ -264,7 +264,8 @@ printf("\n Утилита для чтения flash модемов на balong-�
    case 't':
      tflag=1;
      strcpy(ptfile,optarg);
-    
+     break;
+     
    case 'f':
      if (rflag) {
        printf("\n Ключи -f и -r несовместимы\n");
@@ -476,7 +477,7 @@ for(pnum=0;
 	 ptable[pnum].count);
 }
 printf("\n");
-if (mflag) {
+if (mflag && !tflag) {
   out=fopen("ptable.bin","wb");
   fwrite(databuf+0x1f800,1,0x800,out);
   fclose(out);
