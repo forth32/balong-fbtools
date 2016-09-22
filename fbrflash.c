@@ -477,10 +477,12 @@ for(pnum=0;
 	 ptable[pnum].count);
 }
 printf("\n");
-if (mflag && !tflag) {
-  out=fopen("ptable.bin","wb");
-  fwrite(databuf+0x1f800,1,0x800,out);
-  fclose(out);
+if (mflag) {
+  if (!tflag) {
+    out=fopen("ptable.bin","wb");
+    fwrite(databuf+0x1f800,1,0x800,out);
+    fclose(out);
+  }
   return;
 }
 
