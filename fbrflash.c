@@ -32,7 +32,7 @@ struct {
 
 //============== Параметры флешки ==================
 // Размер страницы данной флешки
-uint32_t pagesize=1024;
+uint32_t pagesize=2048;
 // Размер OOB 
 uint32_t oobsize=64;
 // Число страниц на блок
@@ -108,9 +108,9 @@ else {
     printf("\n Ошибка передачи команды в режиме libusb: %s\n",libusb_error_name(res));
     return 0;
   }
-  usleep(800);
+  usleep(1000);
   // прием данных
-  res=libusb_bulk_transfer(udev, EP_out, resbuf, 0x5000, &dlen, 800);
+  res=libusb_bulk_transfer(udev, EP_out, resbuf, 0x2000, &dlen, 10800);
   if (res<0) {
     printf("\n Ошибка приема данных в режиме libusb: %s\n",libusb_error_name(res));
     return 0;
@@ -142,7 +142,7 @@ char cmdbuf[100];
 uint32_t res;
 
 // sprintf(cmdbuf,"oem nanddump:%x:840:40",adr);
-sprintf(cmdbuf,"oem nanddump:%x:%x:%x",adr,pagesize,oobsize);
+sprintf(cmdbuf,"oem nanddump:%x:%x:%x",adr,pagesize+oobsize,oobsize);
 res=sendcmd(cmdbuf,buf);
 // printf("\n ----res = %i----\n",res);
 // usleep(800);
@@ -190,14 +190,28 @@ return 1;
 //********************************************************
 int32_t detect_flash() {
   
-uint8_t resbuf[1024];
+uint8_t resbuf[100];
 uint32_t res;
 
 res=sendcmd("getvar:pagesize",resbuf);
 if (res == 0) return 0;
-printf("\n--------------------");
-dump(resbuf,res);
-printf("\n--------------------");
+if (strncmp(resbuf,"OKAY2048",8) == 0) {
+  // флешка со страницей 2048 байт
+  pagesize=2048;
+  oobsize=64;
+  ppb=64;
+  return 1;
+}  
+
+if (strncmp(resbuf,"OKAY4096",8) == 0) {
+  // флешка со страницей 2048 байт
+  pagesize=4096;
+  oobsize=0;
+  ppb=64;
+  return 1;
+}  
+printf("\n Команда getvar:pagesize возвратила ошибку");
+return 0;
 }
 
 
@@ -238,8 +252,8 @@ char ptfile[200];
 FILE* pt;
 
 /////////////////////////////
-pagesize=4096;
-oobsize=0;
+// pagesize=4096;
+// oobsize=0;
 ////////////////////////////
 // Расширения выходных файлов 
 char* extlist[3]={"bin","oob","yaffs2"};
@@ -441,6 +455,13 @@ if (!SetCommTimeouts(hSerial, &CommTimeouts))
     return;
 }
 #endif
+
+// Определяем параметры флешки
+if (!detect_flash()) {
+  printf("\n Невозможно определить параметры nand flash\n");
+  return;
+}  
+printf("\n Размер страницы флешки - %i байт\n",pagesize);
 
 // режим абсолютного чтения
 if (rflag) {
