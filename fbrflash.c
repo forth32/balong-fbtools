@@ -142,7 +142,8 @@ char cmdbuf[100];
 uint32_t res;
 
 // sprintf(cmdbuf,"oem nanddump:%x:840:40",adr);
-sprintf(cmdbuf,"oem nanddump:%x:%x:%x",adr,pagesize+oobsize,oobsize);
+// sprintf(cmdbuf,"oem nanddump:%x:%x:%x",adr,pagesize+oobsize,oobsize);
+sprintf(cmdbuf,"oem pagenanddump:0:%x:%x",adr,pagesize+oobsize);
 res=sendcmd(cmdbuf,buf);
 // printf("\n ----res = %i----\n",res);
 // usleep(800);
@@ -174,7 +175,8 @@ for(i=0;i<ppb;i++) {
       memcpy(databuf+(pagesize+oobsize)*i,allbuf,pagesize+oobsize);
       break;
     case 2:  // data+tag 
-      memcpy(databuf+(pagesize+16)*i,allbuf,pagesize+16);
+      memcpy(databuf+(pagesize+16)*i,allbuf,pagesize);    // data
+      memcpy(databuf+(pagesize+16)*i+pagesize,allbuf+pagesize+0x20,16); //tag
       break;
   }    
 }
@@ -241,7 +243,7 @@ int pnum;
 unsigned int opt;
 int i,j,skipflag;
 
-unsigned int mflag=0,oflag=0,rflag=0,yflag=0,oobmode,tflag=0;
+unsigned int mflag=0,oflag=0,rflag=0,yflag=0,oobmode,tflag=0, nflag=0;
 unsigned int pnums[50];  // список разделов для чтения
 unsigned int pncount=0;  // число разделов для чтения
 int blklen;
@@ -258,7 +260,7 @@ FILE* pt;
 // Расширения выходных файлов 
 char* extlist[3]={"bin","oob","yaffs2"};
 
-while ((opt = getopt(argc, argv, "u:p:mof:r:hyt:")) != -1) {
+while ((opt = getopt(argc, argv, "nu:p:mof:r:hyt:")) != -1) {
   switch (opt) {
    case 'h': 
      
@@ -270,6 +272,7 @@ printf("\n Утилита для чтения flash модемов на balong-�
 -p <tty> - последовательный порт fastboot в режиме serial (по умолчанию /dev/ttyUSB0\n\
 -u <pid> - PID USB-устройства fastboot в режиме libusb\n\
 -m       - показать карту разделов\n\
+-n       - показать параметры nand flash\n\
 -t <file> - взять таблицу разделов из указанного файла вместо чтения из модема\n\
 -o       - чтение с OOB (в формате 2048+64), без ключа - только данные\n\
 -y       - чтение с тегом yaffs2 в формате 2048+16\n\
@@ -298,6 +301,10 @@ printf("\n Утилита для чтения flash модемов на balong-�
     
    case 'm':
     mflag=1;
+    break;
+    
+   case 'n':
+    nflag=1;
     break;
     
    case 'o':
@@ -456,13 +463,25 @@ if (!SetCommTimeouts(hSerial, &CommTimeouts))
 }
 #endif
 
+//----------------------------------------------------------------
 // Определяем параметры флешки
 if (!detect_flash()) {
   printf("\n Невозможно определить параметры nand flash\n");
   return;
 }  
-printf("\n Размер страницы флешки - %i байт\n",pagesize);
 
+if (nflag) {
+  printf("\n Параметры NAND Flash:\n\
+  * Размер страницы: %i байт\n\
+  * Размер ООВ:      %i байт\n\
+  * Страниц на блок: %i\n\
+  * Размер блока:    %i байт\n",
+    pagesize,oobsize,ppb,pagesize*ppb);
+  
+  return;
+}  
+
+//----------------------------------------------------------------
 // режим абсолютного чтения
 if (rflag) {
  printf("\n");	 
