@@ -30,6 +30,13 @@ struct {
     unsigned count;
 } ptable[100];
 
+//============== Параметры флешки ==================
+// Размер страницы данной флешки
+uint32_t pagesize=1024;
+// Размер OOB 
+uint32_t oobsize=64;
+// Число страниц на блок
+uint32_t ppb=64;
 
 #ifndef WIN32
 int siofd;
@@ -75,10 +82,9 @@ for (i=0;i<len;i+=16) {
 
 
 //****************************************************************
-// отправка команды и получение ответа
+//  Отправка команды и получение ответа
 //
-//  возвращает 0 - ответ ERROR
-//             1 - ответ ОК 
+// * возвращает размер полученного ответа
 //****************************************************************
 int sendcmd(char* cmdbuf, char* resbuf) {
 
@@ -102,9 +108,9 @@ else {
     printf("\n Ошибка передачи команды в режиме libusb: %s\n",libusb_error_name(res));
     return 0;
   }
-  usleep(600);
+  usleep(800);
   // прием данных
-  res=libusb_bulk_transfer(udev, EP_out, resbuf, 0x2000, &dlen, 100);
+  res=libusb_bulk_transfer(udev, EP_out, resbuf, 0x5000, &dlen, 800);
   if (res<0) {
     printf("\n Ошибка приема данных в режиме libusb: %s\n",libusb_error_name(res));
     return 0;
@@ -133,9 +139,17 @@ return dlen;
 int readpage(int adr, char* buf) {
 
 char cmdbuf[100];
+uint32_t res;
+
+// sprintf(cmdbuf,"oem nanddump:%x:840:40",adr);
+sprintf(cmdbuf,"oem nanddump:%x:%x:%x",adr,pagesize,oobsize);
+res=sendcmd(cmdbuf,buf);
+// printf("\n ----res = %i----\n",res);
+// usleep(800);
+// dump(buf,res);
+//   res=4096;
+return res;
   
-sprintf(cmdbuf,"oem nanddump:%x:840:40",adr);
-return sendcmd(cmdbuf,buf);
 }
 
 //*****************************************
@@ -148,25 +162,43 @@ return sendcmd(cmdbuf,buf);
 int readblock(int blk, char* databuf, int oobmode) {
   
 int i;
-char allbuf[0x1000];
+char allbuf[0x2000];
 
-for(i=0;i<64;i++) {
-  if (readpage(blk*0x20000+0x800*i,allbuf) != 0x840) return 0;
+for(i=0;i<ppb;i++) {
+  if (readpage(blk*pagesize*ppb+pagesize*i,allbuf) != (pagesize+oobsize)) return 0;
   switch (oobmode) {
     case 0:   // data
-      memcpy(databuf+0x800*i,allbuf,0x800);
+      memcpy(databuf+pagesize*i,allbuf,pagesize);
       break;
     case 1:  // data+oob
-      memcpy(databuf+0x840*i,allbuf,0x840);
+      memcpy(databuf+(pagesize+oobsize)*i,allbuf,pagesize+oobsize);
       break;
     case 2:  // data+tag 
-      memcpy(databuf+0x810*i,allbuf,0x810);
+      memcpy(databuf+(pagesize+16)*i,allbuf,pagesize+16);
       break;
   }    
 }
 return 1;
 }
 
+//********************************************************
+//* Определение больших флешек (со страницей 4К)
+//*
+//* возвращает:
+//*   0 - ошибка обработки команды
+//*   1 - команда обработана и размер флешки определен
+//********************************************************
+int32_t detect_flash() {
+  
+uint8_t resbuf[1024];
+uint32_t res;
+
+res=sendcmd("getvar:pagesize",resbuf);
+if (res == 0) return 0;
+printf("\n--------------------");
+dump(resbuf,res);
+printf("\n--------------------");
+}
 
 
 //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
@@ -180,7 +212,7 @@ char device[20] = "\\\\.\\COM";
 DCB dcbSerialParams = {0};
 COMMTIMEOUTS CommTimeouts;
 #endif
-char databuf[0x840*65];
+char databuf[0x3000*65];
 FILE* out;
 char filename[100];
 #ifndef WIN32
@@ -205,6 +237,10 @@ int usbkdriver=0;        // признак занятости usb-устройс
 char ptfile[200];
 FILE* pt;
 
+/////////////////////////////
+pagesize=4096;
+oobsize=0;
+////////////////////////////
 // Расширения выходных файлов 
 char* extlist[3]={"bin","oob","yaffs2"};
 
@@ -232,10 +268,7 @@ printf("\n Утилита для чтения flash модемов на balong-�
 
    case 'p':
 #ifndef WIN32
-    if (upid != 0) {
-       printf("\n Ключи -p и -u несовместимы\n");
-       return;
-     }  
+    upid=0; 
 #endif
     strcpy(sioname,optarg);
     break;
@@ -299,15 +332,15 @@ if (oflag && yflag) {
 
 // полный размер блока
 if (oflag) {
-  blklen=0x840*64;           // полный oob 
+  blklen=(pagesize+oobsize)*ppb;           // полный oob 
   oobmode=1;
 }  
 else if (yflag) {
-  blklen=0x810*64;      // yaffs2 тег
+  blklen=(pagesize+16)*ppb;      // yaffs2 тег
   oobmode=2;
 }  
 else {
-  blklen=0x800*64;          // только данные
+  blklen=pagesize*ppb;          // только данные
   oobmode=0;
 }  
 
@@ -337,7 +370,7 @@ if (upid == 0) {
  sioparm.c_iflag = 0;  // INPCK;
  sioparm.c_oflag = 0;
  sioparm.c_lflag = 0;
- sioparm.c_cc[VTIME]=10;  // таймаут 
+ sioparm.c_cc[VTIME]=20;  // таймаут 
  sioparm.c_cc[VMIN]=0;   // 1 байт минимального ответа
 
  tcsetattr(siofd, TCSANOW, &sioparm);
