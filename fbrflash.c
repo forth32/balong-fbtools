@@ -143,9 +143,9 @@ int readpage(int adr, char* buf) {
 char cmdbuf[100];
 uint32_t res;
 
-// sprintf(cmdbuf,"oem nanddump:%x:840:40",adr);
+sprintf(cmdbuf,"oem nanddump:%x:840:40",adr);
 // sprintf(cmdbuf,"oem nanddump:%x:%x:%x",adr,pagesize+oobsize,oobsize);
-sprintf(cmdbuf,"oem pagenanddump:0:%x:%x",adr,pagesize+oobsize);
+// sprintf(cmdbuf,"oem pagenanddump:0:%x:%x",adr,pagesize+oobsize);
 res=sendcmd(cmdbuf,buf);
 // printf("\n ----res = %i----\n",res);
 // usleep(800);
@@ -533,7 +533,7 @@ if (rflag) {
 
 if (!tflag) {
   // таблица разделов с флешки
- if (readblock(0,databuf,0)) memcpy(ptable,databuf+0x1f830,0x7c0);
+ if (!readblock(0,databuf,0)) memcpy(ptable,databuf+0x1f830,0x7c0);
  else {
   printf("\nТаблица разделов не найдена в разделе m3boot, ищем в fastboot...");
   fflush(stdout);
