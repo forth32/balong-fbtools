@@ -41,6 +41,8 @@ uint32_t ppb=64;
 #ifndef WIN32
 int siofd;
 
+char databuf[0x3000*65];
+
 libusb_context* ctx=0;
 libusb_device_handle* udev=0;
 unsigned char EP_out = 0x81; // выходной EP - для приема данных от устройства
@@ -217,6 +219,28 @@ return 0;
 }
 
 
+//********************************************************
+//* Поиск таблицы разделов внутри m3boot
+//********************************************************
+int locate_ptable(uint8_t* ptbuf) {
+
+int blk,i;
+
+for(blk=2;blk<16;blk++) {
+  if (readblock(blk,databuf,0) != 1) continue; // ошибка чтения
+  for (i=0;i<pagesize*ppb;i++) {
+    if (memcmp(databuf+i,"pTableHead\x00\x00",12) == 0) goto found;
+  }
+}  
+return 0; // не нашли
+found:
+// dump(databuf+i,1024);
+// нашли
+memcpy(ptbuf,databuf+i+0x30,2048);
+return 1;
+}
+
+
 //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
 void main(int argc, char* argv[]) {
@@ -228,7 +252,6 @@ char device[20] = "\\\\.\\COM";
 DCB dcbSerialParams = {0};
 COMMTIMEOUTS CommTimeouts;
 #endif
-char databuf[0x3000*65];
 FILE* out;
 char filename[100];
 #ifndef WIN32
@@ -510,13 +533,18 @@ if (rflag) {
 
 if (!tflag) {
   // таблица разделов с флешки
- if (!readblock(0,databuf,0)) {
-  printf("\n Ошибка чтения таблицы разделов\n");
-  return;
+ if (!readblock(0,databuf,0)) memcpy(ptable,databuf+0x1f830,0x7c0);
+ else {
+  printf("\nТаблица разделов не найдена в разделе m3boot, ищем в fastboot...");
+  fflush(stdout);
+  if (locate_ptable((uint8_t*)&ptable)) printf("таблица найдена");
+  else {
+   printf("\n! Невозможно найти таблицу разделов"); 
+   return;
+  }  
  }
- memcpy(ptable,databuf+0x1f830,0x7c0);
-}
-
+ 
+} // !tflag
 else {
   // таблица разделов из файла
   pt=fopen(ptfile,"rb");
