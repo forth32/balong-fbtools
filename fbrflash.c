@@ -533,7 +533,7 @@ if (rflag) {
 
 if (!tflag) {
   // таблица разделов с флешки
- if (!readblock(0,databuf,0)) memcpy(ptable,databuf+0x1f830,0x7c0);
+ if (readblock(0,databuf,0)) memcpy(ptable,databuf+0x1f830,0x7c0);
  else {
   printf("\nТаблица разделов не найдена в разделе m3boot, ищем в fastboot...");
   fflush(stdout);
