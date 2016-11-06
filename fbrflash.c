@@ -13,6 +13,8 @@
 #include <libusb-1.0/libusb.h>
 #else
 #include <windows.h>
+#include <setupapi.h>
+#include <stdint.h>
 #include "wingetopt.h"
 #include "printf.h"
 #endif
@@ -38,11 +40,10 @@ uint32_t oobsize=64;
 // Число страниц на блок
 uint32_t ppb=64;
 
-#ifndef WIN32
-int siofd;
-
 char databuf[0x3000*65];
 
+#ifndef WIN32
+int siofd;
 libusb_context* ctx=0;
 libusb_device_handle* udev=0;
 unsigned char EP_out = 0x81; // выходной EP - для приема данных от устройства
@@ -82,6 +83,63 @@ for (i=0;i<len;i+=16) {
  }
 }
 
+#ifdef WIN32
+
+DEFINE_GUID(GUID_DEVCLASS_PORTS, 0x4D36E978, 0xE325, 0x11CE, 0xBF, 0xC1, 0x08, 0x00, 0x2B, 0xE1, 0x03, 0x18);
+
+static int find_port(int* port_no, char* port_name)
+{
+  HDEVINFO device_info_set;
+  DWORD member_index = 0;
+  SP_DEVINFO_DATA device_info_data;
+  DWORD reg_data_type;
+  char property_buffer[256];
+  DWORD required_size;
+  char* p;
+  int result = 1;
+
+  device_info_set = SetupDiGetClassDevs(&GUID_DEVCLASS_PORTS, NULL, 0, DIGCF_PRESENT);
+
+  if (device_info_set == INVALID_HANDLE_VALUE)
+    return result;
+
+  while (TRUE)
+  {
+    ZeroMemory(&device_info_data, sizeof(SP_DEVINFO_DATA));
+    device_info_data.cbSize = sizeof(SP_DEVINFO_DATA);
+
+    if (!SetupDiEnumDeviceInfo(device_info_set, member_index, &device_info_data))
+      break;
+
+    member_index++;
+
+    if (!SetupDiGetDeviceRegistryPropertyA(device_info_set, &device_info_data, SPDRP_HARDWAREID,
+             &reg_data_type, (PBYTE)property_buffer, sizeof(property_buffer), &required_size))
+      continue;
+
+    if (strstr(_strupr(property_buffer), "VID_12D1&PID_36DD") != NULL)
+    {
+      if (SetupDiGetDeviceRegistryPropertyA(device_info_set, &device_info_data, SPDRP_FRIENDLYNAME,
+              &reg_data_type, (PBYTE)property_buffer, sizeof(property_buffer), &required_size))
+      {
+        p = strstr(property_buffer, " (COM");
+        if (p != NULL)
+        {
+          *port_no = atoi(p + 5);
+          strcpy(port_name, property_buffer);
+          result = 0;
+        }
+      }
+      break;
+    }
+  }
+
+  SetupDiDestroyDeviceInfoList(device_info_set);
+
+  return result;
+}
+
+#endif
 
 //****************************************************************
 //  Отправка команды и получение ответа
@@ -258,6 +316,8 @@ char filename[100];
 char sioname[50]="/dev/ttyUSB0";
 #else
 char sioname[50]="";
+int port_no;
+char port_name[256];
 #endif
 unsigned int startblk;
 unsigned int len;
@@ -291,10 +351,15 @@ printf("\n Утилита для чтения flash модемов на balong-�
 \n Модем должен находиться в режиме fastboot\
 \n\n\
 %s [ключи] \n\n\
- Допустимы следующие ключи:\n\n\
--p <tty> - последовательный порт fastboot в режиме serial (по умолчанию /dev/ttyUSB0\n\
--u <pid> - PID USB-устройства fastboot в режиме libusb\n\
--m       - показать карту разделов\n\
+ Допустимы следующие ключи:\n\n"
+#ifndef WIN32
+"-p <tty> - последовательный порт fastboot в режиме serial (по умолчанию /dev/ttyUSB0)\n"
+"-u <pid> - PID USB-устройства fastboot в режиме libusb\n"
+#else
+"-p # - номер последовательннго порта fastboot (например, -p8)\n"
+"  если ключ -p не указан, используется автопоиск порта\n"
+#endif
+"-m       - показать карту разделов\n\
 -n       - показать параметры nand flash\n\
 -t <file> - взять таблицу разделов из указанного файла вместо чтения из модема\n\
 -o       - чтение с OOB (в формате 2048+64), без ключа - только данные\n\
@@ -394,11 +459,21 @@ else {
 if (upid == 0) {
 #endif
 #ifdef WIN32
-    if (*sioname == '\0')
-    {
-       printf("\n - Последовательный порт не задан\n"); 
-       return; 
-    }
+if (*sioname == '\0')
+{
+  printf("\n\nПоиск порта...\n");
+  
+  if (find_port(&port_no, port_name) == 0)
+  {
+    sprintf(sioname, "%d", port_no);
+    printf("Порт: \"%s\"\n", port_name);
+  }
+  else
+  {
+    printf("Порт не обнаружен!\n");
+    return;
+  }
+}
 #endif
 
 #ifndef WIN32
@@ -473,7 +548,7 @@ if (!SetCommState(hSerial, &dcbSerialParams))
     return;
 }
 
-CommTimeouts.ReadIntervalTimeout = 2/*MAXDWORD*/;
+CommTimeouts.ReadIntervalTimeout = 2;
 CommTimeouts.ReadTotalTimeoutConstant = 500;
 CommTimeouts.ReadTotalTimeoutMultiplier = 0;
 CommTimeouts.WriteTotalTimeoutConstant = 0;
@@ -488,10 +563,10 @@ if (!SetCommTimeouts(hSerial, &CommTimeouts))
 
 //----------------------------------------------------------------
 // Определяем параметры флешки
-if (!detect_flash()) {
+/*if (!detect_flash()) {
   printf("\n Невозможно определить параметры nand flash\n");
   return;
-}  
+}*/  
 
 if (nflag) {
   printf("\n Параметры NAND Flash:\n\
