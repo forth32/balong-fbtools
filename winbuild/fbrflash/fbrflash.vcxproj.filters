@@ -18,7 +18,7 @@
     <ClCompile Include="..\..\fbrflash.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\shared\wingetopt.c">
+    <ClCompile Include="..\shared\getopt.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -26,7 +26,7 @@
     <ClInclude Include="..\shared\printf.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\shared\wingetopt.h">
+    <ClInclude Include="..\shared\getopt.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
