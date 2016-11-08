@@ -158,7 +158,7 @@ if (upid == 0) {
   tcflush(siofd,TCIOFLUSH);  // очистка выходного буфера
   write(siofd,cmdbuf,strlen(cmdbuf));  // отсылка команды
   usleep(600);
-  dlen=read(siofd,resbuf,/*80960*/reslen);   // ответ команды
+  dlen=read(siofd,resbuf,80960/*reslen*/);   // ответ команды
 }
 else {
   // режим libusb
@@ -170,7 +170,7 @@ else {
   }
   usleep(1000);
   // прием данных
-  res=libusb_bulk_transfer(udev, EP_out, resbuf, /*0x2000*/reslen, &dlen, 10800);
+  res=libusb_bulk_transfer(udev, EP_out, resbuf, 0x2000/*reslen*/, &dlen, 10800);
   if (res<0) {
     printf("\n Ошибка приема данных в режиме libusb: %s\n",libusb_error_name(res));
     return 0;
@@ -183,7 +183,6 @@ DWORD bytes_written = 0;
 PurgeComm(hSerial, PURGE_RXCLEAR);
 
 WriteFile(hSerial, cmdbuf, strlen(cmdbuf), &bytes_written, NULL);
-FlushFileBuffers(hSerial);
 
 dlen = 0;
 /*res = */ReadFile(hSerial, resbuf, reslen, (LPDWORD)&dlen, NULL);
@@ -192,6 +191,60 @@ dlen = 0;
 
 return dlen; 
 }
+
+#ifndef WIN32
+
+//*****************************************
+//*  Чтение страницы флешки 
+//*****************************************
+int readpage(int adr, char* buf) {
+
+char cmdbuf[100];
+uint32_t res;
+
+sprintf(cmdbuf,"oem nanddump:%x:840:40",adr);
+// sprintf(cmdbuf,"oem nanddump:%x:%x:%x",adr,pagesize+oobsize,oobsize);
+// sprintf(cmdbuf,"oem pagenanddump:0:%x:%x",adr,pagesize+oobsize);
+res=sendcmd(cmdbuf,buf);
+// printf("\n ----res = %i----\n",res);
+// usleep(800);
+// dump(buf,res);
+//   res=4096;
+return res;
+  
+}
+
+//*****************************************
+//*  Чтение блока флешки 
+//*
+//*  oobmode=0 - чтение data
+//*  oobmode=1 - чтение data+oob
+//*  oobmode=2 - чтение data+yaffs2 tag
+//*****************************************
+int readblock(int blk, char* databuf, int oobmode) {
+  
+int i;
+char allbuf[0x2000];
+
+for(i=0;i<ppb;i++) {
+  if (readpage(blk*pagesize*ppb+pagesize*i,allbuf) != (pagesize+oobsize)) return 0;
+  switch (oobmode) {
+    case 0:   // data
+      memcpy(databuf+pagesize*i,allbuf,pagesize);
+      break;
+    case 1:  // data+oob
+      memcpy(databuf+(pagesize+oobsize)*i,allbuf,pagesize+oobsize);
+      break;
+    case 2:  // data+tag 
+      memcpy(databuf+(pagesize+16)*i,allbuf,pagesize);    // data
+      memcpy(databuf+(pagesize+16)*i+pagesize,allbuf+pagesize+0x20,16); //tag
+      break;
+  }    
+}
+return 1;
+}
+
+#else
 
 //*****************************************
 //*  Чтение блока флешки 
@@ -208,13 +261,13 @@ uint32_t res;
 int i;
 
 if (oobmode == 0) {
-    len = pagesize*ppb;
-    sprintf(cmdbuf, "oem nanddump:%x:%x:0", blk * pagesize * ppb, len);
+  len = pagesize * ppb;
+  sprintf(cmdbuf, "oem nanddump:%x:%x:0", blk * pagesize * ppb, len);
 }
 else {
-    len = (pagesize + oobsize) * ppb;
-    sprintf(cmdbuf, "oem nanddump:%x:%x:%x", blk * pagesize * ppb, len, oobsize);
-}    
+  len = (pagesize + oobsize) * ppb;
+  sprintf(cmdbuf, "oem nanddump:%x:%x:%x", blk * pagesize * ppb, len, oobsize);
+}
 
 res = sendcmd(cmdbuf, databuf, len);
 
@@ -224,12 +277,14 @@ if (res != len)
 if (oobmode == 2) {
   for (i = 0; i < ppb; i++) {
     bpp = pagesize + 16;
-    memcpy(databuf + bpp * i, databuf + (pagesize + oobsize) * i, bpp);
+    memmove(databuf + bpp * i, databuf + (pagesize + oobsize) * i, bpp);
   }
 }
 
 return 1;
 }
+
+#endif
 
 //********************************************************
 //* Определение больших флешек (со страницей 4К)
@@ -245,7 +300,7 @@ uint32_t res;
 
 res=sendcmd("getvar:pagesize",resbuf,sizeof(resbuf));
 if (res == 0) return 0;
-if (strncmp(resbuf,"OKAY2048",8) == 0) {
+if (strncmp(resbuf,"OKAY2048",8) == 0 || (res == 4 && strncmp(resbuf,"OKAY",4) == 0)) {
   // флешка со страницей 2048 байт
   pagesize=2048;
   oobsize=64;
