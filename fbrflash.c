@@ -205,7 +205,7 @@ uint32_t res;
 sprintf(cmdbuf,"oem nanddump:%x:840:40",adr);
 // sprintf(cmdbuf,"oem nanddump:%x:%x:%x",adr,pagesize+oobsize,oobsize);
 // sprintf(cmdbuf,"oem pagenanddump:0:%x:%x",adr,pagesize+oobsize);
-res=sendcmd(cmdbuf,buf);
+res=sendcmd(cmdbuf,buf,0x3000);
 // printf("\n ----res = %i----\n",res);
 // usleep(800);
 // dump(buf,res);
@@ -653,13 +653,13 @@ if (rflag) {
 
 if (!tflag) {
   // таблица разделов с флешки
- if (readblock(0,databuf,0)) memcpy(ptable,databuf+0x1f830,0x7c0);
+ if (readblock(0,databuf,0) && (memcmp(databuf+i,"pTableHead\x00\x00",12) == 0)) memcpy(ptable,databuf+0x1f830,0x7c0);
  else {
   printf("\nТаблица разделов не найдена в разделе m3boot, ищем в fastboot...");
   fflush(stdout);
   if (locate_ptable((uint8_t*)&ptable)) printf("таблица найдена");
   else {
-   printf("\n! Невозможно найти таблицу разделов"); 
+   printf("\n! Невозможно найти таблицу разделов\n"); 
    return;
   }  
  }
