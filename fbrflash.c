@@ -255,33 +255,75 @@ return 1;
 //*****************************************
 int readblock(int blk, char* databuf, int oobmode)
 {
-char cmdbuf[100];
-uint32_t len, bpp;
-uint32_t res;
-int i;
+    char cmdbuf[100];
+    static char databuf2[300000];
+    uint32_t len, bpp;
+    uint32_t res;
+    int pprb;
+    int i;
 
-if (oobmode == 0) {
-  len = pagesize * ppb;
-  sprintf(cmdbuf, "oem nanddump:%x:%x:0", blk * pagesize * ppb, len);
-}
-else {
-  len = (pagesize + oobsize) * ppb;
-  sprintf(cmdbuf, "oem nanddump:%x:%x:%x", blk * pagesize * ppb, len, oobsize);
-}
+    if (pagesize == 2048) {
+        pprb = oobmode == 0 ? 16 /*32К*/ : 4;  //2..64 : 1..4,64
 
-res = sendcmd(cmdbuf, databuf, len);
+        for (i = 0; i < ppb / pprb; i++) {
+            if (oobmode == 0) {
+                len = pagesize * pprb;
+                sprintf(cmdbuf, "oem nanddump:%x:%x:0", blk * pagesize * ppb + len * i, len);
+            }
+            else {
+                len = (pagesize + oobsize) * pprb;
+                sprintf(cmdbuf, "oem nanddump:%x:%x:%x", blk * pagesize * ppb + pagesize * pprb * i, len, oobsize);
+            }
+            res = sendcmd(cmdbuf, databuf + len * i, len);
+            if (res != len)
+                return 0;
+        }
 
-if (res != len)
-  return 0;
+        if (oobmode == 2) {
+            for (i = 0; i < ppb; i++) {
+                bpp = pagesize + 16;
+                memmove(databuf + bpp * i, databuf + (pagesize + oobsize) * i, bpp);
+            }
+        }
 
-if (oobmode == 2) {
-  for (i = 0; i < ppb; i++) {
-    bpp = pagesize + 16;
-    memmove(databuf + bpp * i, databuf + (pagesize + oobsize) * i, bpp);
-  }
-}
+    }
+    else {  // B315 (pagesize == 4096)
+        pprb = oobmode == 0 ? 8 /*32К*/ : 1;
 
-return 1;
+        for (i = 0; i < ppb / pprb; i++) {
+            if (oobmode == 0) {
+                len = pagesize * pprb;
+                sprintf(cmdbuf, "oem nanddump:%x:%x:0", blk * pagesize * ppb + len * i, len);
+            }
+            else {
+                len = pagesize + oobsize;
+                sprintf(cmdbuf, "oem pagenanddump:0:%x:%x", blk * pagesize * ppb + pagesize * i, len);
+            }
+            res = sendcmd(cmdbuf, databuf + len * i, len);
+            if (res != len)
+                return 0;
+        }
+
+        if (oobmode == 2) {
+            pprb = 8; //32К
+            for (i = 0; i < ppb / pprb; i++) {
+                len = pagesize * pprb;
+                sprintf(cmdbuf, "oem nanddump:%x:%x:0", blk * pagesize * ppb + len * i, len);
+                res = sendcmd(cmdbuf, databuf2 + len * i, len);
+                if (res != len)
+                    return 0;
+            }
+
+            for (i = 0; i < ppb; i++) {
+                bpp = pagesize + 16;
+                memcpy(databuf + bpp * i, databuf2 + pagesize * i, pagesize);
+                memmove(databuf + bpp * i + pagesize,
+                    databuf + (pagesize + oobsize) * i + (1032 + 28) * 3 + 916 + 2 + 84 + 28 + 2, 16);
+            }
+        }
+    }
+
+    return 1;
 }
 
 #endif
@@ -311,8 +353,8 @@ if (strncmp(resbuf,"OKAY2048",8) == 0 || (res == 4 && strncmp(resbuf,"OKAY",4) =
 if (strncmp(resbuf,"OKAY4096",8) == 0) {
   // флешка со страницей 2048 байт
   pagesize=4096;
-  oobsize=0;
-  ppb=64;
+  oobsize=224;
+  ppb=/*64*/32;
   return 1;
 }  
 printf("\n Команда getvar:pagesize возвратила ошибку");
@@ -399,7 +441,7 @@ printf("\n Утилита для чтения flash модемов на balong-�
 "-p <tty> - последовательный порт fastboot в режиме serial (по умолчанию /dev/ttyUSB0)\n"
 "-u <pid> - PID USB-устройства fastboot в режиме libusb\n"
 #else
-"-p # - номер последовательннго порта fastboot (например, -p8)\n"
+"-p # - номер последовательного порта fastboot (например, -p8)\n"
 "  если ключ -p не указан, используется автопоиск порта\n"
 #endif
 "-m       - показать карту разделов\n\
@@ -613,6 +655,19 @@ if (!detect_flash()) {
   return;
 }
 
+if (oflag) {
+  blklen=(pagesize+oobsize)*ppb;           // полный oob 
+  oobmode=1;
+}  
+else if (yflag) {
+  blklen=(pagesize+16)*ppb;      // yaffs2 тег
+  oobmode=2;
+}  
+else {
+  blklen=pagesize*ppb;          // только данные
+  oobmode=0;
+}  
+
 if (nflag) {
   printf("\n Параметры NAND Flash:\n\
   * Размер страницы: %i байт\n\
@@ -653,7 +708,7 @@ if (rflag) {
 
 if (!tflag) {
   // таблица разделов с флешки
- if (readblock(0,databuf,0) && (memcmp(databuf+i,"pTableHead\x00\x00",12) == 0)) memcpy(ptable,databuf+0x1f830,0x7c0);
+ if (readblock(0,databuf,0) && (memcmp(databuf+0x1f800,"pTableHead\x00\x00",12) == 0)) memcpy(ptable,databuf+0x1f830,0x7c0);
  else {
   printf("\nТаблица разделов не найдена в разделе m3boot, ищем в fastboot...");
   fflush(stdout);
