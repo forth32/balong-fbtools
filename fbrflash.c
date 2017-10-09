@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include "getopt.h"
 #include "printf.h"
+#include "adb_api.h"
 #endif
 
 
@@ -48,10 +49,13 @@ libusb_context* ctx=0;
 libusb_device_handle* udev=0;
 unsigned char EP_out = 0x81; // выходной EP - для приема данных от устройства
 unsigned char EP_in  = 0x01; // входной EP - для передачит данных устройству
-int upid=0x36dd;                  // PID устройства для режима libusb
 #else
 static HANDLE hSerial;
+ADBAPIHANDLE adb_interface = NULL;
+ADBAPIHANDLE adb_read = NULL;
+ADBAPIHANDLE adb_write = NULL;
 #endif
+int upid=0x36dd;                  // PID устройства для режима libusb
 
 
 //*************************************************
@@ -179,14 +183,29 @@ else {
 #else
 DWORD bytes_written = 0;
 //BOOL res;
-
-PurgeComm(hSerial, PURGE_RXCLEAR);
-
-WriteFile(hSerial, cmdbuf, strlen(cmdbuf), &bytes_written, NULL);
-
 dlen = 0;
-/*res = */ReadFile(hSerial, resbuf, reslen, (LPDWORD)&dlen, NULL);
-//res = GetLastError();
+
+if (upid == 0) {
+    PurgeComm(hSerial, PURGE_RXCLEAR);
+
+    WriteFile(hSerial, cmdbuf, strlen(cmdbuf), &bytes_written, NULL);
+
+    /*res = */ReadFile(hSerial, resbuf, reslen, (LPDWORD)&dlen, NULL);
+    //res = GetLastError();
+}
+else {
+    bool write_res, read_res;
+    write_res = AdbWriteEndpointSync(adb_write, cmdbuf, strlen(cmdbuf), &bytes_written, 500);
+    if (write_res == false) {
+        printf("\nAdbWriteEndpointSync error %d\n", GetLastError());
+        return 0;
+    }
+    read_res = AdbReadEndpointSync(adb_read, resbuf, reslen, (LPDWORD)&dlen, 500);
+    if (read_res == false) {
+        printf("\nAdbReadEndpointSync error %d\n", GetLastError());
+        return 0;
+    }
+}
 #endif
 
 return dlen; 
@@ -428,10 +447,13 @@ FILE* pt;
 // Расширения выходных файлов 
 char* extlist[3]={"bin","oob","yaffs2"};
 
+#ifndef WIN32
 while ((opt = getopt(argc, argv, "nu:p:mof:r:hyt:")) != -1) {
+#else
+while ((opt = getopt(argc, argv, "nup::mof:r:hyt:")) != -1) {
+#endif
   switch (opt) {
    case 'h': 
-     
 printf("\n Утилита для чтения flash модемов на balong-платформе\
 \n Модем должен находиться в режиме fastboot\
 \n\n\
@@ -441,14 +463,17 @@ printf("\n Утилита для чтения flash модемов на balong-�
 "-p <tty> - последовательный порт fastboot в режиме serial (по умолчанию /dev/ttyUSB0)\n"
 "-u <pid> - PID USB-устройства fastboot в режиме libusb\n"
 #else
-"-p # - номер последовательного порта fastboot (например, -p8)\n"
-"  если ключ -p не указан, используется автопоиск порта\n"
+"-u       - работа в режиме USB (по умолчанию)\n"
+"-p[#]    - работа в режиме serial\n"
+"           # - номер последовательного порта fastboot (например, -p7)\n"
+"               если номер не указан, производится автоопределение порта\n"
 #endif
 "-m       - показать карту разделов\n\
 -n       - показать параметры nand flash\n\
 -t <file> - взять таблицу разделов из указанного файла вместо чтения из модема\n\
 -o       - чтение с OOB (в формате 2048+64), без ключа - только данные\n\
--y       - чтение с тегом yaffs2 в формате 2048+16\n\
+           для B315 чтение производится в \"сыром\" формате\n\
+-y       - чтение с тегом yaffs2 (в формате 2048+16 или 4096+16)\n\
   -- Выбор режимов чтения --- \n\
 -f #     - чтение раздела с указанным номером, ключ можно указать несколько раз\n\
 -r start[:len] - прочитать len блоков с блока start (по умолчанию len=1)\n\
@@ -457,20 +482,28 @@ printf("\n Утилита для чтения flash модемов на balong-�
     return;
 
    case 'p':
-#ifndef WIN32
-    upid=0; 
+#ifdef WIN32
+    if (upid == 1) {
+       printf("\n Ключи -u и -p несовместимы\n");
+       return;
+    }  
+    if (optarg != NULL)
 #endif
-    strcpy(sioname,optarg);
+        strcpy(sioname,optarg);
+    upid=0;
     break;
 
    case 'u':
-#ifndef WIN32
-    sscanf(optarg,"%x",&upid); 
-    break;
+#ifdef WIN32
+    if (*sioname != '\0') {
+       printf("\n Ключи -u и -p несовместимы\n");
+       return;
+    }
+    upid = 1;
 #else
-    printf("\n Ключ -u не поддерживается!\n");
-    return;
+    sscanf(optarg,"%x",&upid); 
 #endif
+    break;
     
    case 'm':
     mflag=1;
@@ -542,26 +575,6 @@ else {
 
 #ifndef WIN32
 if (upid == 0) {
-#endif
-#ifdef WIN32
-if (*sioname == '\0')
-{
-  printf("\n\nПоиск порта...\n");
-  
-  if (find_port(&port_no, port_name) == 0)
-  {
-    sprintf(sioname, "%d", port_no);
-    printf("Порт: \"%s\"\n", port_name);
-  }
-  else
-  {
-    printf("Порт не обнаружен!\n");
-    return;
-  }
-}
-#endif
-
-#ifndef WIN32
   // Настройка SIO
  siofd = open(sioname, O_RDWR | O_NOCTTY |O_SYNC);
  if (siofd == -1) {
@@ -608,44 +621,97 @@ else {
   }
 }
 #else
-strcat(device, sioname);
+if (upid == 0) {
+    if (*sioname == '\0')
+    {
+      printf("\n\nПоиск порта...\n");
+  
+      if (find_port(&port_no, port_name) == 0)
+      {
+        sprintf(sioname, "%d", port_no);
+        printf("Порт: \"%s\"\n", port_name);
+      }
+      else
+      {
+        printf("Порт не обнаружен!\n");
+        return;
+      }
+    }
+    strcat(device, sioname);
     
-hSerial = CreateFileA(device, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-if (hSerial == INVALID_HANDLE_VALUE)
-{
-    printf("\n - Последовательный порт COM%s не открывается\n", sioname); 
-    return;
+    hSerial = CreateFileA(device, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    if (hSerial == INVALID_HANDLE_VALUE)
+    {
+        printf("\n - Последовательный порт COM%s не открывается\n", sioname); 
+        return;
+    }
+
+    ZeroMemory(&dcbSerialParams, sizeof(dcbSerialParams));
+    dcbSerialParams.DCBlength=sizeof(dcbSerialParams);
+    dcbSerialParams.BaudRate = CBR_115200;
+    dcbSerialParams.ByteSize = 8;
+    dcbSerialParams.StopBits = ONESTOPBIT;
+    dcbSerialParams.Parity = NOPARITY;
+    dcbSerialParams.fBinary = TRUE;
+    dcbSerialParams.fDtrControl = DTR_CONTROL_ENABLE;
+    dcbSerialParams.fRtsControl = RTS_CONTROL_ENABLE;
+    if (!SetCommState(hSerial, &dcbSerialParams))
+    {
+        printf("\n - Ошибка при инициализации COM-порта\n", sioname); 
+        CloseHandle(hSerial);
+        return;
+    }
+
+    CommTimeouts.ReadIntervalTimeout = 100;
+    CommTimeouts.ReadTotalTimeoutConstant = 2000;
+    CommTimeouts.ReadTotalTimeoutMultiplier = 0;
+    CommTimeouts.WriteTotalTimeoutConstant = 0;
+    CommTimeouts.WriteTotalTimeoutMultiplier = 0;
+    if (!SetCommTimeouts(hSerial, &CommTimeouts))
+    {
+        printf("\n - Ошибка при инициализации COM-порта\n", sioname); 
+        CloseHandle(hSerial);
+        return;
+    }
+
+    PurgeComm(hSerial, PURGE_RXCLEAR);
+}
+else {
+    const GUID adb_interface_id = ANDROID_USB_CLASS_ID;
+    
+    adb_interface = AdbCreateInterface(adb_interface_id, 0x12D1, 0x36DD, 0xFF);
+    if (adb_interface == NULL) {
+        int err = GetLastError();
+        if (err == 4319)
+            printf("\n Устройство не найдено!\n");
+        else {
+            printf("\n Ошибка при инициализации подсистемы USB: AdbCreateInterface error %d\n", err);
+            if (err == 1)
+                printf(" возможно, отсутствует AdbWinUsbApi.dll\n");
+        }
+        return;
+    }
+
+    adb_read = AdbOpenDefaultBulkReadEndpoint(adb_interface,
+                                                         AdbOpenAccessTypeReadWrite,
+                                                         AdbOpenSharingModeReadWrite);
+    if (adb_read == NULL) {
+        printf("\n Ошибка при инициализации подсистемы USB: AdbOpenDefaultBulkReadEndpoint error %d\n", GetLastError());
+        AdbCloseHandle(adb_interface);
+        return;
+    }
+
+    adb_write = AdbOpenDefaultBulkWriteEndpoint(adb_interface,
+                                                            AdbOpenAccessTypeReadWrite,
+                                                            AdbOpenSharingModeReadWrite);
+    if (adb_write == NULL) {
+        printf("\n Ошибка при инициализации подсистемы USB: AdbOpenDefaultBulkWriteEndpoint error %d\n", GetLastError());
+        AdbCloseHandle(adb_read);
+        AdbCloseHandle(adb_interface);
+        return;
+    }
 }
 
-ZeroMemory(&dcbSerialParams, sizeof(dcbSerialParams));
-dcbSerialParams.DCBlength=sizeof(dcbSerialParams);
-dcbSerialParams.BaudRate = CBR_115200;
-dcbSerialParams.ByteSize = 8;
-dcbSerialParams.StopBits = ONESTOPBIT;
-dcbSerialParams.Parity = NOPARITY;
-dcbSerialParams.fBinary = TRUE;
-dcbSerialParams.fDtrControl = DTR_CONTROL_ENABLE;
-dcbSerialParams.fRtsControl = RTS_CONTROL_ENABLE;
-if (!SetCommState(hSerial, &dcbSerialParams))
-{
-    printf("\n - Ошибка при инициализации COM-порта\n", sioname); 
-    CloseHandle(hSerial);
-    return;
-}
-
-CommTimeouts.ReadIntervalTimeout = 100;
-CommTimeouts.ReadTotalTimeoutConstant = 2000;
-CommTimeouts.ReadTotalTimeoutMultiplier = 0;
-CommTimeouts.WriteTotalTimeoutConstant = 0;
-CommTimeouts.WriteTotalTimeoutMultiplier = 0;
-if (!SetCommTimeouts(hSerial, &CommTimeouts))
-{
-    printf("\n - Ошибка при инициализации COM-порта\n", sioname); 
-    CloseHandle(hSerial);
-    return;
-}
-
-PurgeComm(hSerial, PURGE_RXCLEAR);
 #endif
 
 //----------------------------------------------------------------
@@ -797,7 +863,15 @@ if (upid != 0) {
   if (usbkdriver) libusb_attach_kernel_driver(udev,0);
   libusb_close(udev);
   libusb_exit(ctx);
-}  
+}
+#else
+if (upid == 0)
+    CloseHandle(hSerial);
+else {
+    AdbCloseHandle(adb_write);
+    AdbCloseHandle(adb_read);
+    AdbCloseHandle(adb_interface);
+}
 #endif
 
 printf("\n\n");  
